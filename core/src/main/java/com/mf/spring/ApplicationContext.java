@@ -88,22 +88,18 @@ public class ApplicationContext {
 
         val clazz = beanDefinition.getType();
         try {
+            // 实例化
             val instance = clazz.getConstructor().newInstance();
+            singletonMap.put(beanName, instance);
+            // 依赖注入
             for (Field field : clazz.getDeclaredFields()) {
                 if (field.isAnnotationPresent(Autowired.class)){
                     field.setAccessible(true);
                     field.set(instance, getBean(field.getName()));
                 }
             }
-            singletonMap.put(beanName, instance);
             return instance;
-        } catch (InstantiationException e) {
-            throw new RuntimeException(e);
-        } catch (IllegalAccessException e) {
-            throw new RuntimeException(e);
-        } catch (InvocationTargetException e) {
-            throw new RuntimeException(e);
-        } catch (NoSuchMethodException e) {
+        } catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException  e) {
             throw new RuntimeException(e);
         }
     }
