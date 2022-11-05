@@ -1,5 +1,6 @@
 package com.mf.spring;
 
+import com.mf.spring.annotation.Autowired;
 import com.mf.spring.annotation.Component;
 import com.mf.spring.annotation.ComponentScan;
 import com.mf.spring.annotation.Scope;
@@ -7,6 +8,7 @@ import lombok.val;
 
 import java.beans.Introspector;
 import java.io.File;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,27 +38,32 @@ public class ApplicationContext {
                 try {
                     val clazz = ApplicationContext.class.getClassLoader().loadClass(path.replace("\\", "."));
                     if (clazz.isAnnotationPresent(Component.class)) {
-                        val component = clazz.getAnnotation(Component.class);
-                        BeanDefinition beanDefinition = new BeanDefinition();
-                        beanDefinition.setType(clazz);
-                        if (clazz.isAnnotationPresent(Scope.class)){
-                            beanDefinition.setScope(clazz.getAnnotation(Scope.class).value());
-                        }
-                        String beanName = component.value();
-                        if (beanName.equals("")) {
-                            beanName = Introspector.decapitalize(clazz.getSimpleName());
-                        }
-                        if (clazz.isAnnotationPresent(Scope.class)){
-                            val scope = clazz.getAnnotation(Scope.class).value();
-                            beanDefinition.setScope(scope);
-                        }
-                        beanDefinitionHashMap.put(beanName, beanDefinition);
+                        getBeanDefinition(clazz);
+
                     }
                 } catch (ClassNotFoundException e) {
                     throw new RuntimeException(e);
                 }
             }
         }
+    }
+
+    private void getBeanDefinition(Class<?> clazz) {
+        val component = clazz.getAnnotation(Component.class);
+        BeanDefinition beanDefinition = new BeanDefinition();
+        beanDefinition.setType(clazz);
+        if (clazz.isAnnotationPresent(Scope.class)){
+            beanDefinition.setScope(clazz.getAnnotation(Scope.class).value());
+        }
+        String beanName = component.value();
+        if (beanName.equals("")) {
+            beanName = Introspector.decapitalize(clazz.getSimpleName());
+        }
+        if (clazz.isAnnotationPresent(Scope.class)){
+            val scope = clazz.getAnnotation(Scope.class).value();
+            beanDefinition.setScope(scope);
+        }
+        beanDefinitionHashMap.put(beanName, beanDefinition);
     }
 
     private File getScanPath (String scanPath) {
@@ -79,8 +86,15 @@ public class ApplicationContext {
 
     private Object createBean(String beanName, BeanDefinition beanDefinition) {
 
+        val clazz = beanDefinition.getType();
         try {
-            val instance = beanDefinition.getType().getConstructor().newInstance();
+            val instance = clazz.getConstructor().newInstance();
+            for (Field field : clazz.getDeclaredFields()) {
+                if (field.isAnnotationPresent(Autowired.class)){
+                    field.setAccessible(true);
+                    field.set(instance, getBean(field.getName()));
+                }
+            }
             singletonMap.put(beanName, instance);
             return instance;
         } catch (InstantiationException e) {
