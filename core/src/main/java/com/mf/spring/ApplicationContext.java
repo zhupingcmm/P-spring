@@ -1,23 +1,25 @@
 package com.mf.spring;
 
-import com.mf.spring.annotation.Autowired;
-import com.mf.spring.annotation.Component;
-import com.mf.spring.annotation.ComponentScan;
-import com.mf.spring.annotation.Scope;
+import com.mf.spring.annotation.*;
+import com.mf.spring.aware.NameAware;
 import lombok.val;
 
 import java.beans.Introspector;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class ApplicationContext {
 
     private final Map<String, BeanDefinition> beanDefinitionHashMap = new ConcurrentHashMap<>();
 
     private final Map<String, Object> singletonMap = new ConcurrentHashMap<>();
+
+    private final CopyOnWriteArrayList<BeanPostProcessor> beanPostProcessorList = new CopyOnWriteArrayList<>();
 
     public ApplicationContext(Class<?> clazz){
         if (clazz.isAnnotationPresent(ComponentScan.class)){
@@ -39,9 +41,15 @@ public class ApplicationContext {
                     val clazz = ApplicationContext.class.getClassLoader().loadClass(path.replace("\\", "."));
                     if (clazz.isAnnotationPresent(Component.class)) {
                         getBeanDefinition(clazz);
-
+                        if (BeanPostProcessor.class.isAssignableFrom(clazz)){
+                            beanPostProcessorList.add((BeanPostProcessor) clazz.newInstance());
+                        }
                     }
                 } catch (ClassNotFoundException e) {
+                    throw new RuntimeException(e);
+                } catch (InstantiationException e) {
+                    throw new RuntimeException(e);
+                } catch (IllegalAccessException e) {
                     throw new RuntimeException(e);
                 }
             }
@@ -88,8 +96,9 @@ public class ApplicationContext {
 
         val clazz = beanDefinition.getType();
         try {
+
             // 实例化
-            val instance = clazz.getConstructor().newInstance();
+            Object instance = clazz.getConstructor().newInstance();
             singletonMap.put(beanName, instance);
             // 依赖注入
             for (Field field : clazz.getDeclaredFields()) {
@@ -98,6 +107,33 @@ public class ApplicationContext {
                     field.set(instance, getBean(field.getName()));
                 }
             }
+            // aware
+            if(instance instanceof NameAware){
+                ((NameAware)instance).setBeanName(beanName);
+            }
+
+            for (Method declaredMethod : clazz.getDeclaredMethods()) {
+                if(declaredMethod.isAnnotationPresent(PostConstruct.class)){
+                    declaredMethod.setAccessible(true);
+                    declaredMethod.invoke(instance);
+                }
+
+            }
+            // beanPostProcessor before
+            for (BeanPostProcessor beanPostProcessor : beanPostProcessorList) {
+              instance = beanPostProcessor.beanPostProcessorBeforeInitialization(beanName, instance);
+            }
+            // 初始化 InitializingBean
+            if (instance instanceof InitializingBean) {
+                ((InitializingBean)instance).afterPropertiesSet();
+            }
+
+            // beanPostProcessor after
+            for (BeanPostProcessor beanPostProcessor : beanPostProcessorList) {
+              instance = beanPostProcessor.beanPostProcessorAfterInitialization(beanName, instance);
+            }
+
+
             return instance;
         } catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException  e) {
             throw new RuntimeException(e);
